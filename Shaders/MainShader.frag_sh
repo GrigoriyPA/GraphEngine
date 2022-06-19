@@ -1,0 +1,131 @@
+#version 330 core
+
+#define NR_LIGHTS 2
+
+
+struct Light {
+    int type;
+    float constant, linear, quadratic, cut_in, cut_out;
+    vec3 position, direction, ambient, diffuse, specular;
+};
+
+
+struct Material {
+    bool light;
+    float shininess, alpha;
+    vec3 ambient, diffuse, specular, emission;
+}; 
+
+
+in vec2 tex_coord;
+in vec3 frag_pos;
+in vec3 norm;
+
+out vec4 color;
+
+uniform float gamma;
+uniform bool border;
+uniform bool use_diffuse_map;
+uniform bool use_specular_map;
+uniform bool use_emission_map;
+uniform sampler2D diffuse_map;
+uniform sampler2D specular_map;
+uniform sampler2D emission_map;
+uniform vec3 border_color;
+uniform vec3 view_pos;
+uniform Material object_material;
+uniform Light lights[NR_LIGHTS];
+
+
+vec3 calc_dir_light(Light light, vec3 normal, vec3 view_dir, Material material) {
+    vec3 light_dir = normalize(-light.direction);
+    float diff = max(dot(normal, light_dir), 0.0);
+
+    vec3 halfway_dir = normalize(light_dir + view_dir);
+    float spec = pow(max(dot(normal, halfway_dir), 0.0), material.shininess);
+
+    vec3 ambient = light.ambient * material.ambient;
+    vec3 diffuse = light.diffuse * diff * material.diffuse;
+    vec3 specular = light.specular * spec * material.specular;
+
+    return ambient + diffuse + specular;
+}
+
+
+vec3 calc_point_light(Light light, vec3 normal, vec3 frag_pos, vec3 view_dir, Material material) {
+    vec3 light_dir = normalize(light.position - frag_pos);
+    float diff = max(dot(normal, light_dir), 0.0);
+
+    vec3 halfway_dir = normalize(light_dir + view_dir);
+    float spec = pow(max(dot(normal, halfway_dir), 0.0), material.shininess);
+
+    float distance = length(light.position - frag_pos);
+    float attenuation = 1.0 / (light.constant + light.linear * distance + light.quadratic * (distance * distance));
+
+    vec3 ambient = light.ambient * material.ambient * attenuation;
+    vec3 diffuse = light.diffuse * diff * material.diffuse * attenuation;
+    vec3 specular = light.specular * spec * material.specular * attenuation;
+
+    return ambient + diffuse + specular;
+}
+
+
+vec3 calc_spot_light(Light light, vec3 normal, vec3 frag_pos, vec3 view_dir, Material material) {
+    vec3 light_dir = normalize(light.position - frag_pos);
+    float diff = max(dot(normal, light_dir), 0.0);
+
+    vec3 halfway_dir = normalize(light_dir + view_dir);
+    float spec = pow(max(dot(normal, halfway_dir), 0.0), material.shininess);
+
+    float distance = length(light.position - frag_pos);
+    float attenuation = 1.0 / (light.constant + light.linear * distance + light.quadratic * (distance * distance));
+
+    float theta = dot(light_dir, normalize(-light.direction));
+    float intensity = clamp((theta - light.cut_out) / (light.cut_in - light.cut_out), 0.0, 1.0);    
+
+    vec3 ambient = light.ambient * material.ambient * attenuation;
+    vec3 diffuse = light.diffuse * diff * material.diffuse * attenuation * intensity;
+    vec3 specular = light.specular * spec * material.specular * attenuation * intensity;
+
+    return ambient + diffuse + specular;
+}
+
+
+void main() {
+    if (border) {
+        color = vec4(border_color, 1.0);
+        return;
+    }
+
+    Material material = object_material;
+	if (use_diffuse_map) {
+        vec4 diffuse_color = texture(diffuse_map, tex_coord);
+		material.ambient = vec3(diffuse_color);
+		material.diffuse = vec3(diffuse_color);
+        material.alpha = diffuse_color.w;
+	}
+	if (use_specular_map)
+		material.specular = vec3(texture(specular_map, tex_coord));
+    if (use_emission_map)
+        material.emission = vec3(texture(emission_map, tex_coord));
+
+    if (material.light) {
+        color = vec4(material.emission, 1.0);
+        return;
+    }
+
+    if (material.alpha < 0.1)
+        discard;
+
+    vec3 result_color = vec3(0.0);
+    for(int i = 0; i < NR_LIGHTS; i++) {
+        if (lights[i].type == 0)
+  	        result_color += calc_dir_light(lights[i], normalize(norm), normalize(view_pos - frag_pos), material);
+        else if (lights[i].type == 1)
+            result_color += calc_point_light(lights[i], normalize(norm), frag_pos, normalize(view_pos - frag_pos), material);
+        else
+            result_color += calc_spot_light(lights[i], normalize(norm), frag_pos, normalize(view_pos - frag_pos), material);
+    }
+
+    color = vec4(pow(result_color + material.emission, vec3(1.0 / gamma)), material.alpha);
+}
