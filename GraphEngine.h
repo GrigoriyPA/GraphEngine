@@ -211,6 +211,7 @@ public:
 
 	GraphEngine(sf::RenderWindow* window, double fov, double min_distance, double max_distance) {
 		this->window = window;
+		window->setActive(true);
 		init_gl();
 
 		screen_ratio = ((double)window->getSize().x) / ((double)window->getSize().y);
@@ -301,6 +302,7 @@ public:
 	}
 
 	void draw() {
+		window->setActive(true);
 		draw_framebuffer();
 		draw_mainbuffer();
 	}
